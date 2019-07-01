@@ -4,7 +4,7 @@ using LinearAlgebra
 using Random
 
 using EnhancedGJK
-using EnhancedGJK: projection_weights, projection_weights_reference
+using EnhancedGJK: projection_weights, projection_weights_reference, reset!
 using CoordinateTransformations: IdentityTransformation, Translation
 using StaticArrays: SVector
 import GeometryTypes
@@ -12,6 +12,33 @@ const gt = GeometryTypes
 using FileIO
 
 const mesh_dir = joinpath(dirname(@__FILE__), "meshes")
+
+@testset "Issue #17" begin
+    # Note: when this test was written, it mattered whether it was the first
+    # test or not.
+    geomA = gt.FlexibleConvexHull(gt.Point{2,Float64}[
+        gt.Point(1.125, 2.0),
+        gt.Point(0.125, 2.0),
+        gt.Point(0.125, 2.8),
+        gt.Point(0.325, 3.0),
+        gt.Point(0.925, 3.0),
+        gt.Point(1.125, 2.8)]
+    )
+    geomB = gt.FlexibleConvexHull(gt.Point{2,Float64}[
+        gt.Point(-0.025, 1.2321067811865476),
+        gt.Point(-0.025, 1.2821067811865474),
+        gt.Point(0.3267766952966369, 1.2821067811865474),
+        gt.Point(0.3267766952966369, 1.2321067811865476)]
+    )
+
+    cache = CollisionCache(geomA, geomB)
+    poseA = poseB = IdentityTransformation()
+    simplex = EnhancedGJK.transform_simplex(cache, poseA, poseB)
+    @test isapprox(projection_weights(simplex), projection_weights_reference(simplex))
+
+    result = gjk(geomA, geomB)
+    @test result.signed_distance > 0
+end
 
 @testset "reference distance" begin
     mesh = load(joinpath(mesh_dir, "base_link.obj"))
@@ -182,6 +209,19 @@ end
         c2 = gt.Simplex(gt.Vec(1,1.), gt.Vec(10, 2.))
         @test gjk(c1, c2).signed_distance == 0.
     end
+end
+
+@testset "reset!" begin
+    c1 = gt.FlexibleConvexHull([gt.Vec(0.,0), gt.Vec(0.,1), gt.Vec(1.,0),gt.Vec(1.,1)])
+    c2 = gt.Simplex(gt.Vec(4.,0.5))
+    cache = CollisionCache(c1, c2)
+    initial_simplex = deepcopy(cache.simplex_points)
+    gjk!(cache, IdentityTransformation(), IdentityTransformation())
+    @test cache.simplex_points != initial_simplex
+    reset!(cache)
+    @test cache.simplex_points == initial_simplex
+    allocs = @allocated reset!(cache)
+    @test allocs == 0
 end
 
 @testset "benchmarks" begin
